@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { RiskScoreGauge } from '@/components/assessments/risk-score-gauge'
+import { useGlobalLoader } from '@/components/shared/global-loader-provider'
 import type { Vendor, RiskAssessment, RiskLevel, VendorStatus } from '@/types'
 import {
   ArrowLeft,
@@ -70,6 +71,7 @@ export default function VendorDetailPage() {
   const params = useParams()
   const router = useRouter()
   const vendorId = params.id as string
+  const { withLoader } = useGlobalLoader()
 
   const [vendor, setVendor] = useState<(Vendor & { assessments?: RiskAssessment[] }) | null>(null)
   const [loading, setLoading] = useState(true)
@@ -77,21 +79,23 @@ export default function VendorDetailPage() {
 
   useEffect(() => {
     async function load() {
-      setLoading(true)
-      try {
-        const res = await fetch(`/api/vendors/${vendorId}`)
-        if (res.ok) {
-          const body = await res.json()
-          setVendor(body.data ?? body)
+      await withLoader(async () => {
+        setLoading(true)
+        try {
+          const res = await fetch(`/api/vendors/${vendorId}`)
+          if (res.ok) {
+            const body = await res.json()
+            setVendor(body.data ?? body)
+          }
+        } catch {
+          // fail silently
+        } finally {
+          setLoading(false)
         }
-      } catch {
-        // fail silently
-      } finally {
-        setLoading(false)
-      }
+      })
     }
-    load()
-  }, [vendorId])
+    void load()
+  }, [vendorId, withLoader])
 
   if (loading) {
     return (

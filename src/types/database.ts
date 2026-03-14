@@ -1,4 +1,4 @@
-// These types MUST match the SQL enums in src/lib/schema.sql exactly
+// These types MUST match the SQL enums in supabase/migrations exactly.
 export type UserRole = 'owner' | 'admin' | 'compliance_officer' | 'risk_manager' | 'analyst' | 'viewer'
 export type VendorStatus = 'active' | 'inactive' | 'pending_review' | 'onboarding' | 'offboarding' | 'suspended' | 'archived'
 export type RiskLevel = 'critical' | 'high' | 'medium' | 'low' | 'minimal'

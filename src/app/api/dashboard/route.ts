@@ -84,7 +84,7 @@ export async function GET() {
 
       supabase
         .from('audit_logs')
-        .select('id, action, resource_type, resource_name, created_at, user_id')
+        .select('id, action, resource_type, resource_id, details, created_at, user_id')
         .eq('organization_id', orgId)
         .order('created_at', { ascending: false })
         .limit(8),
@@ -164,15 +164,28 @@ export async function GET() {
         status: vendor.status,
       }))
 
-    const recent_activity = auditRows.map((row) => ({
-      id: row.id,
-      user_name: 'Team Member',
-      user_email: '',
-      action: row.action,
-      resource_type: row.resource_type,
-      resource_name: row.resource_name,
-      created_at: row.created_at,
-    }))
+    const recent_activity = auditRows.map((row) => {
+      const details =
+        row.details && typeof row.details === 'object' ? (row.details as Record<string, unknown>) : null
+      const detailsName =
+        typeof details?.resource_name === 'string'
+          ? details.resource_name
+          : typeof details?.name === 'string'
+            ? details.name
+            : typeof details?.title === 'string'
+              ? details.title
+              : null
+
+      return {
+        id: row.id,
+        user_name: 'Team Member',
+        user_email: '',
+        action: row.action,
+        resource_type: row.resource_type ?? 'system',
+        resource_name: detailsName ?? row.resource_id ?? 'Unknown resource',
+        created_at: row.created_at,
+      }
+    })
 
     return successResponse({
       metrics: {

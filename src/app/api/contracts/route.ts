@@ -1,7 +1,39 @@
 import { createClient } from '@/lib/supabase/server'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { getAuthContext, unauthorizedResponse, errorResponse, successResponse, getPaginationParams } from '@/lib/api-utils'
 import { logAuditEvent } from '@/modules/auth/audit.service'
+import { z } from 'zod'
+import type { Database } from '@/types/database'
+
+type ContractStatus = Database['public']['Enums']['contract_status']
+
+const contractStatuses = [
+  'draft',
+  'pending_review',
+  'active',
+  'expired',
+  'terminated',
+  'renewed',
+] as const satisfies readonly ContractStatus[]
+
+const dateLikeString = z.string().trim().refine((value) => !Number.isNaN(Date.parse(value)), {
+  message: 'Invalid date format',
+})
+
+const contractCreateSchema = z.object({
+  vendor_id: z.string().uuid('vendor_id must be a valid UUID'),
+  title: z.string().trim().min(1, 'Title is required').max(200),
+  contract_type: z.string().trim().max(120).optional().nullable(),
+  status: z.enum(contractStatuses).optional(),
+  start_date: dateLikeString.optional().nullable(),
+  end_date: dateLikeString.optional().nullable(),
+  renewal_date: dateLikeString.optional().nullable(),
+  value: z.number().nonnegative().optional().nullable(),
+  auto_renew: z.boolean().optional(),
+  terms: z.record(z.string(), z.unknown()).optional().nullable(),
+  document_url: z.string().trim().url('document_url must be a valid URL').optional().nullable(),
+  signed_at: dateLikeString.optional().nullable(),
+})
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,7 +51,11 @@ export async function GET(request: NextRequest) {
       .select('*, vendors(name)', { count: 'exact' })
       .eq('organization_id', auth.profile.organization_id)
 
-    if (status) query = query.eq('status', status as any)
+    if (status && !contractStatuses.includes(status as ContractStatus)) {
+      return errorResponse('Invalid status filter', 400)
+    }
+
+    if (status) query = query.eq('status', status as ContractStatus)
     if (vendor_id) query = query.eq('vendor_id', vendor_id)
 
     query = query
@@ -34,8 +70,8 @@ export async function GET(request: NextRequest) {
       data,
       pagination: { page, per_page, total: count },
     })
-  } catch (err: any) {
-    return errorResponse(err.message)
+  } catch (err: unknown) {
+    return errorResponse(err instanceof Error ? err.message : 'Unexpected error')
   }
 }
 
@@ -45,14 +81,30 @@ export async function POST(request: NextRequest) {
     const auth = await getAuthContext(supabase)
     if (!auth) return unauthorizedResponse()
 
-    const body = await request.json()
+    const body = await request.json() as unknown
+    const parsed = contractCreateSchema.safeParse(body)
+    if (!parsed.success) {
+      return errorResponse(parsed.error.issues[0]?.message ?? 'Invalid payload', 400)
+    }
+
+    const { vendor_id, ...rest } = parsed.data
+    const { data: vendor, error: vendorError } = await supabase
+      .from('vendors')
+      .select('id')
+      .eq('id', vendor_id)
+      .eq('organization_id', auth.profile.organization_id)
+      .single()
+
+    if (vendorError || !vendor) {
+      return errorResponse('Vendor not found in your organization', 404)
+    }
 
     const { data, error } = await supabase
       .from('contracts')
       .insert({
-        ...body,
+        ...rest,
+        vendor_id,
         organization_id: auth.profile.organization_id,
-        created_by: auth.user.id,
       })
       .select()
       .single()
@@ -66,11 +118,11 @@ export async function POST(request: NextRequest) {
       action: 'create',
       resourceType: 'contract',
       resourceId: data.id,
-      metadata: { vendor_id: body.vendor_id },
+      metadata: { vendor_id },
     })
 
     return successResponse(data, 201)
-  } catch (err: any) {
-    return errorResponse(err.message)
+  } catch (err: unknown) {
+    return errorResponse(err instanceof Error ? err.message : 'Unexpected error')
   }
 }

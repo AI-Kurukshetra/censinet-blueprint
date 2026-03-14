@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
+import { useGlobalLoader } from '@/components/shared/global-loader-provider'
 
 // --- Types ---
 
@@ -56,6 +57,7 @@ const mockVendors = [
 
 export default function NewIncidentPage() {
   const router = useRouter()
+  const { withLoader } = useGlobalLoader()
   const [formData, setFormData] = useState<IncidentFormData>({
     title: '',
     description: '',
@@ -108,16 +110,21 @@ export default function NewIncidentPage() {
     return Object.keys(newErrors).length === 0
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!validate()) return
 
     setIsSubmitting(true)
-    // Simulate submission
-    setTimeout(() => {
-      setIsSubmitting(false)
+    try {
+      await withLoader(async () => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 1000)
+        })
+      })
       router.push('/incidents')
-    }, 1000)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (

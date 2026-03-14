@@ -24,6 +24,7 @@ interface ContractFormProps {
   open: boolean
   onClose: () => void
   onSubmit: (data: ContractFormData) => void
+  vendors?: Array<{ id: string; name: string }>
   initialData?: Partial<ContractFormData>
   isEditing?: boolean
 }
@@ -36,7 +37,7 @@ const contractTypes = [
   { value: 'other', label: 'Other' },
 ]
 
-const mockVendors = [
+const fallbackVendors = [
   { id: 'v1', name: 'CloudMedix' },
   { id: 'v2', name: 'HealthSync' },
   { id: 'v3', name: 'DataVault Pro' },
@@ -46,7 +47,16 @@ const mockVendors = [
 
 // --- Component ---
 
-export function ContractForm({ open, onClose, onSubmit, initialData, isEditing }: ContractFormProps) {
+export function ContractForm({
+  open,
+  onClose,
+  onSubmit,
+  vendors,
+  initialData,
+  isEditing,
+}: ContractFormProps) {
+  const vendorOptions = vendors && vendors.length > 0 ? vendors : fallbackVendors
+
   const [formData, setFormData] = useState<ContractFormData>({
     title: initialData?.title || '',
     vendorId: initialData?.vendorId || '',
@@ -121,7 +131,7 @@ export function ContractForm({ open, onClose, onSubmit, initialData, isEditing }
               onChange={(e) => setFormData({ ...formData, vendorId: e.target.value })}
             >
               <option value="">Select a vendor</option>
-              {mockVendors.map((v) => (
+              {vendorOptions.map((v) => (
                 <option key={v.id} value={v.id}>{v.name}</option>
               ))}
             </select>

@@ -1,7 +1,42 @@
 import { createClient } from '@/lib/supabase/server'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { getAuthContext, unauthorizedResponse, errorResponse, successResponse, getPaginationParams } from '@/lib/api-utils'
-import { logAuditEvent } from '@/modules/auth/audit.service'
+import { z } from 'zod'
+import type { Database } from '@/types/database'
+
+type AlertType = Database['public']['Enums']['alert_type']
+type AlertPriority = Database['public']['Enums']['alert_priority']
+
+const alertTypes = [
+  'contract_expiring',
+  'baa_expiring',
+  'assessment_due',
+  'compliance_gap',
+  'incident_reported',
+  'risk_score_change',
+  'document_expiring',
+  'remediation_overdue',
+  'vendor_status_change',
+  'system',
+] as const satisfies readonly AlertType[]
+
+const alertPriorities = ['critical', 'high', 'medium', 'low', 'info'] as const satisfies readonly AlertPriority[]
+
+const alertCreateSchema = z.object({
+  user_id: z.string().uuid().optional().nullable(),
+  type: z.enum(alertTypes),
+  priority: z.enum(alertPriorities),
+  title: z.string().trim().min(1, 'title is required').max(200),
+  message: z.string().trim().max(5000).optional().nullable(),
+  source: z.string().trim().max(120).optional().nullable(),
+  reference_id: z.string().trim().max(120).optional().nullable(),
+  reference_type: z.string().trim().max(120).optional().nullable(),
+})
+
+const alertsPatchSchema = z.union([
+  z.object({ all: z.literal(true) }),
+  z.object({ id: z.string().uuid('id must be a valid UUID') }),
+])
 
 export async function GET(request: NextRequest) {
   try {
@@ -35,8 +70,8 @@ export async function GET(request: NextRequest) {
       data,
       pagination: { page, per_page, total: count },
     })
-  } catch (err: any) {
-    return errorResponse(err.message)
+  } catch (err: unknown) {
+    return errorResponse(err instanceof Error ? err.message : 'Unexpected error')
   }
 }
 
@@ -46,14 +81,20 @@ export async function POST(request: NextRequest) {
     const auth = await getAuthContext(supabase)
     if (!auth) return unauthorizedResponse()
 
-    const body = await request.json()
+    const body = await request.json() as unknown
+    const parsed = alertCreateSchema.safeParse(body)
+    if (!parsed.success) {
+      return errorResponse(parsed.error.issues[0]?.message ?? 'Invalid payload', 400)
+    }
+
+    const targetUserId = parsed.data.user_id ?? auth.user.id
 
     const { data, error } = await supabase
       .from('alerts')
       .insert({
-        ...body,
+        ...parsed.data,
+        user_id: targetUserId,
         organization_id: auth.profile.organization_id,
-        created_by: auth.user.id,
       })
       .select()
       .single()
@@ -61,8 +102,8 @@ export async function POST(request: NextRequest) {
     if (error) return errorResponse(error.message)
 
     return successResponse(data, 201)
-  } catch (err: any) {
-    return errorResponse(err.message)
+  } catch (err: unknown) {
+    return errorResponse(err instanceof Error ? err.message : 'Unexpected error')
   }
 }
 
@@ -72,9 +113,13 @@ export async function PATCH(request: NextRequest) {
     const auth = await getAuthContext(supabase)
     if (!auth) return unauthorizedResponse()
 
-    const body = await request.json()
+    const body = await request.json() as unknown
+    const parsed = alertsPatchSchema.safeParse(body)
+    if (!parsed.success) {
+      return errorResponse('Must provide "id" or "all: true"', 400)
+    }
 
-    if (body.all === true) {
+    if ('all' in parsed.data && parsed.data.all === true) {
       const { error } = await supabase
         .from('alerts')
         .update({ is_read: true, read_at: new Date().toISOString() })
@@ -87,12 +132,13 @@ export async function PATCH(request: NextRequest) {
       return successResponse({ message: 'All alerts marked as read' })
     }
 
-    if (body.id) {
+    if ('id' in parsed.data) {
       const { data, error } = await supabase
         .from('alerts')
         .update({ is_read: true, read_at: new Date().toISOString() })
-        .eq('id', body.id)
+        .eq('id', parsed.data.id)
         .eq('user_id', auth.user.id)
+        .eq('organization_id', auth.profile.organization_id)
         .select()
         .single()
 
@@ -102,7 +148,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     return errorResponse('Must provide "id" or "all: true"', 400)
-  } catch (err: any) {
-    return errorResponse(err.message)
+  } catch (err: unknown) {
+    return errorResponse(err instanceof Error ? err.message : 'Unexpected error')
   }
 }

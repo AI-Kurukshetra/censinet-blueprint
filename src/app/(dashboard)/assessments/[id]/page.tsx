@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { RiskScoreGauge } from '@/components/assessments/risk-score-gauge'
+import { useGlobalLoader } from '@/components/shared/global-loader-provider'
 import {
   AssessmentQuestionnaire,
   type Section,
@@ -60,6 +61,7 @@ export default function AssessmentDetailPage() {
   const params = useParams()
   const router = useRouter()
   const assessmentId = params.id as string
+  const { withLoader } = useGlobalLoader()
 
   const [assessment, setAssessment] = useState<AssessmentData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -67,21 +69,23 @@ export default function AssessmentDetailPage() {
 
   useEffect(() => {
     async function load() {
-      setLoading(true)
-      try {
-        const res = await fetch(`/api/assessments/${assessmentId}`)
-        if (res.ok) {
-          const body = await res.json()
-          setAssessment(body.data ?? body)
+      await withLoader(async () => {
+        setLoading(true)
+        try {
+          const res = await fetch(`/api/assessments/${assessmentId}`)
+          if (res.ok) {
+            const body = await res.json()
+            setAssessment(body.data ?? body)
+          }
+        } catch {
+          // fail silently
+        } finally {
+          setLoading(false)
         }
-      } catch {
-        // fail silently
-      } finally {
-        setLoading(false)
-      }
+      })
     }
-    load()
-  }, [assessmentId])
+    void load()
+  }, [assessmentId, withLoader])
 
   if (loading) {
     return (

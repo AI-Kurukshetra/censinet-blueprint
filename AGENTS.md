@@ -4,7 +4,8 @@
 - `src/app/`: Next.js App Router pages, layouts, and API routes (`src/app/api/**/route.ts`).
 - `src/components/`: UI building blocks (`ui/`) and feature/shared components (`dashboard/`, `vendors/`, `shared/`, etc.).
 - `src/modules/`: Service-layer logic by domain (for example `vendors.service.ts`, `risk.service.ts`).
-- `src/lib/`: Shared utilities, API helpers, Supabase clients, and SQL schema (`src/lib/schema.sql`).
+- `src/lib/`: Shared utilities, API helpers, and Supabase clients.
+- `supabase/`: Supabase CLI config, migrations, and seed SQL.
 - `src/hooks/`, `src/types/`: Reusable hooks and TypeScript types.
 - `src/__tests__/`: Jest tests grouped by area (`api/`, `components/`, `hooks/`, `lib/`).
 - `public/`: Static assets. `docs/`: product docs and references.
@@ -16,8 +17,9 @@
 - `npm run lint`: Run ESLint (Next.js core-web-vitals + TypeScript rules).
 - `npm test`: Run Jest test suite once.
 - `npm run test:watch`: Run Jest in watch mode.
-- `npm run db:schema`: Apply `src/lib/schema.sql` to `$DATABASE_URL`.
-- `npm run db:seed` / `npm run db:reset`: Seed/reset database (requires `src/lib/seed.sql`).
+- `npm run db:push`: Apply local migrations to the configured Supabase database.
+- `npm run db:reset`: Reset local Supabase database using migrations + seed.
+- `npm run db:reset:no-seed`: Reset local Supabase database without seeding.
 
 ## Coding Style & Naming Conventions
 - Language: TypeScript with `strict` mode enabled (`tsconfig.json`).

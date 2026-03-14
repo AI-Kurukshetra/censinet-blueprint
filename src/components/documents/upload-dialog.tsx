@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -35,6 +35,7 @@ interface UploadDialogProps {
   open: boolean
   onClose: () => void
   onSubmit: (data: UploadFormData) => void
+  vendors?: Array<{ id: string; name: string }>
 }
 
 const documentTypes: { value: DocumentType; label: string }[] = [
@@ -51,7 +52,7 @@ const documentTypes: { value: DocumentType; label: string }[] = [
   { value: 'other', label: 'Other' },
 ]
 
-const mockVendors = [
+const fallbackVendors = [
   { id: 'v1', name: 'CloudMedix' },
   { id: 'v2', name: 'HealthSync' },
   { id: 'v3', name: 'DataVault Pro' },
@@ -67,7 +68,9 @@ function formatFileSize(bytes: number) {
 
 // --- Component ---
 
-export function UploadDialog({ open, onClose, onSubmit }: UploadDialogProps) {
+export function UploadDialog({ open, onClose, onSubmit, vendors }: UploadDialogProps) {
+  const vendorOptions = vendors && vendors.length > 0 ? vendors : fallbackVendors
+
   const [formData, setFormData] = useState<UploadFormData>({
     name: '',
     description: '',
@@ -273,7 +276,7 @@ export function UploadDialog({ open, onClose, onSubmit }: UploadDialogProps) {
               onChange={(e) => setFormData({ ...formData, vendorId: e.target.value })}
             >
               <option value="">No vendor</option>
-              {mockVendors.map((v) => (
+              {vendorOptions.map((v) => (
                 <option key={v.id} value={v.id}>{v.name}</option>
               ))}
             </select>

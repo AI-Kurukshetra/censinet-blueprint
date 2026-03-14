@@ -1,6 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { getAuthContext, unauthorizedResponse, errorResponse, successResponse, getPaginationParams } from '@/lib/api-utils'
+import { z } from 'zod'
+
+const dateLikeString = z.string().trim().refine((value) => !Number.isNaN(Date.parse(value)), {
+  message: 'Invalid date format',
+})
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,9 +21,18 @@ export async function GET(request: NextRequest) {
     const to_date = searchParams.get('to_date')
     const { page, per_page, offset } = getPaginationParams(searchParams)
 
+    if (from_date) {
+      const parsed = dateLikeString.safeParse(from_date)
+      if (!parsed.success) return errorResponse('Invalid from_date filter', 400)
+    }
+    if (to_date) {
+      const parsed = dateLikeString.safeParse(to_date)
+      if (!parsed.success) return errorResponse('Invalid to_date filter', 400)
+    }
+
     let query = supabase
       .from('audit_logs')
-      .select('*, user_profiles(full_name, email)', { count: 'exact' })
+      .select('*, user_profiles(first_name, last_name, email)', { count: 'exact' })
       .eq('organization_id', auth.profile.organization_id)
 
     if (user_id) query = query.eq('user_id', user_id)
@@ -39,7 +53,7 @@ export async function GET(request: NextRequest) {
       data,
       pagination: { page, per_page, total: count },
     })
-  } catch (err: any) {
-    return errorResponse(err.message)
+  } catch (err: unknown) {
+    return errorResponse(err instanceof Error ? err.message : 'Unexpected error')
   }
 }

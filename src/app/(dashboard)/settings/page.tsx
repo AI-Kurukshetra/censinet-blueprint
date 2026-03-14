@@ -20,6 +20,7 @@ import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
 import { createClient } from '@/lib/supabase/client'
+import { useGlobalLoader } from '@/components/shared/global-loader-provider'
 import type { UserRole } from '@/types/database'
 
 // --- Types ---
@@ -85,6 +86,7 @@ function roleLabel(role: string) {
 // --- Component ---
 
 export default function SettingsPage() {
+  const { withLoader } = useGlobalLoader()
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'profile' | 'organization' | 'team' | 'security' | 'notifications'>('profile')
   const [showCurrentPassword, setShowCurrentPassword] = useState(false)
@@ -135,64 +137,68 @@ export default function SettingsPage() {
     const supabase = createClient()
 
     async function loadProfile() {
-      try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) return
-        setCurrentUserId(user.id)
+      await withLoader(async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser()
+          if (!user) return
+          setCurrentUserId(user.id)
 
-        const { data: profileData } = await supabase
-          .from('user_profiles')
-          .select('*, organizations(*)')
-          .eq('id', user.id)
-          .single()
+          const { data: profileData } = await supabase
+            .from('user_profiles')
+            .select('*, organizations(*)')
+            .eq('id', user.id)
+            .single()
 
-        if (profileData) {
-          setCurrentUserRole(profileData.role as UserRole)
-          setProfile({
-            firstName: profileData.first_name || '',
-            lastName: profileData.last_name || '',
-            email: profileData.email || '',
-            phone: profileData.phone || '',
-            jobTitle: profileData.job_title || '',
-            department: profileData.department || '',
-          })
-
-          const orgData = profileData.organizations as { name?: string; domain?: string; logo_url?: string } | null
-          if (orgData) {
-            setOrg({
-              name: orgData.name || '',
-              domain: orgData.domain || '',
-              logoUrl: orgData.logo_url || '',
+          if (profileData) {
+            setCurrentUserRole(profileData.role as UserRole)
+            setProfile({
+              firstName: profileData.first_name || '',
+              lastName: profileData.last_name || '',
+              email: profileData.email || '',
+              phone: profileData.phone || '',
+              jobTitle: profileData.job_title || '',
+              department: profileData.department || '',
             })
+
+            const orgData = profileData.organizations as { name?: string; domain?: string; logo_url?: string } | null
+            if (orgData) {
+              setOrg({
+                name: orgData.name || '',
+                domain: orgData.domain || '',
+                logoUrl: orgData.logo_url || '',
+              })
+            }
           }
+        } catch (err) {
+          console.error('Failed to load profile:', err)
+        } finally {
+          setIsLoading(false)
         }
-      } catch (err) {
-        console.error('Failed to load profile:', err)
-      } finally {
-        setIsLoading(false)
-      }
+      })
     }
 
-    loadProfile()
-  }, [])
+    void loadProfile()
+  }, [withLoader])
 
   const loadTeamMembers = useCallback(async () => {
-    setIsTeamLoading(true)
-    try {
-      const res = await fetch('/api/organizations/members')
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error || 'Failed to load team')
+    await withLoader(async () => {
+      setIsTeamLoading(true)
+      try {
+        const res = await fetch('/api/organizations/members')
+        if (!res.ok) {
+          const err = await res.json()
+          throw new Error(err.error || 'Failed to load team')
+        }
+        const payload = await res.json()
+        setTeamMembers(payload.members || [])
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Failed to load team'
+        showMessage('error', message)
+      } finally {
+        setIsTeamLoading(false)
       }
-      const payload = await res.json()
-      setTeamMembers(payload.members || [])
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to load team'
-      showMessage('error', message)
-    } finally {
-      setIsTeamLoading(false)
-    }
-  }, [])
+    })
+  }, [withLoader])
 
   useEffect(() => {
     if (currentUserRole === 'owner' || currentUserRole === 'admin') {
@@ -208,16 +214,18 @@ export default function SettingsPage() {
   async function handleSaveProfile() {
     setIsSaving(true)
     try {
-      const res = await fetch('/api/auth/profile', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          first_name: profile.firstName,
-          last_name: profile.lastName,
-          phone: profile.phone,
-          job_title: profile.jobTitle,
-          department: profile.department,
-        }),
+      const res = await withLoader(async () => {
+        return await fetch('/api/auth/profile', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            first_name: profile.firstName,
+            last_name: profile.lastName,
+            phone: profile.phone,
+            job_title: profile.jobTitle,
+            department: profile.department,
+          }),
+        })
       })
       if (!res.ok) {
         const err = await res.json()
@@ -235,14 +243,16 @@ export default function SettingsPage() {
   async function handleSaveOrg() {
     setIsSaving(true)
     try {
-      const res = await fetch('/api/organizations', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: org.name,
-          domain: org.domain,
-          logo_url: org.logoUrl,
-        }),
+      const res = await withLoader(async () => {
+        return await fetch('/api/organizations', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: org.name,
+            domain: org.domain,
+            logo_url: org.logoUrl,
+          }),
+        })
       })
       if (!res.ok) {
         const err = await res.json()
@@ -262,8 +272,10 @@ export default function SettingsPage() {
     setIsSaving(true)
     try {
       const supabase = createClient()
-      const { error } = await supabase.auth.updateUser({
-        password: passwords.newPassword,
+      const { error } = await withLoader(async () => {
+        return await supabase.auth.updateUser({
+          password: passwords.newPassword,
+        })
       })
       if (error) throw error
       setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' })
@@ -282,13 +294,15 @@ export default function SettingsPage() {
   ) {
     setIsSaving(true)
     try {
-      const res = await fetch('/api/organizations/members', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          member_id: memberId,
-          ...updates,
-        }),
+      const res = await withLoader(async () => {
+        return await fetch('/api/organizations/members', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            member_id: memberId,
+            ...updates,
+          }),
+        })
       })
       if (!res.ok) {
         const err = await res.json()
@@ -301,6 +315,23 @@ export default function SettingsPage() {
       showMessage('success', 'Team member updated')
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to update member'
+      showMessage('error', message)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function handleSaveNotifications() {
+    setIsSaving(true)
+    try {
+      await withLoader(async () => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 1000)
+        })
+      })
+      showMessage('success', 'Notification preferences saved')
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to save notification preferences'
       showMessage('error', message)
     } finally {
       setIsSaving(false)
@@ -757,7 +788,7 @@ export default function SettingsPage() {
                 ))}
 
                 <div className="flex justify-end border-t pt-4">
-                  <Button onClick={() => { setIsSaving(true); setTimeout(() => setIsSaving(false), 1000) }} disabled={isSaving}>
+                  <Button onClick={handleSaveNotifications} disabled={isSaving}>
                     <Save className="size-4" />
                     {isSaving ? 'Saving...' : 'Save Preferences'}
                   </Button>

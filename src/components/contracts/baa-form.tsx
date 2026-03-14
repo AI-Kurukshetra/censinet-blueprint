@@ -23,11 +23,12 @@ interface BAAFormProps {
   open: boolean
   onClose: () => void
   onSubmit: (data: BAAFormData) => void
+  vendors?: Array<{ id: string; name: string }>
   initialData?: Partial<BAAFormData>
   isEditing?: boolean
 }
 
-const mockVendors = [
+const fallbackVendors = [
   { id: 'v1', name: 'CloudMedix' },
   { id: 'v2', name: 'HealthSync' },
   { id: 'v3', name: 'DataVault Pro' },
@@ -37,7 +38,16 @@ const mockVendors = [
 
 // --- Component ---
 
-export function BAAForm({ open, onClose, onSubmit, initialData, isEditing }: BAAFormProps) {
+export function BAAForm({
+  open,
+  onClose,
+  onSubmit,
+  vendors,
+  initialData,
+  isEditing,
+}: BAAFormProps) {
+  const vendorOptions = vendors && vendors.length > 0 ? vendors : fallbackVendors
+
   const [formData, setFormData] = useState<BAAFormData>({
     vendorId: initialData?.vendorId || '',
     effectiveDate: initialData?.effectiveDate || '',
@@ -103,7 +113,7 @@ export function BAAForm({ open, onClose, onSubmit, initialData, isEditing }: BAA
               onChange={(e) => setFormData({ ...formData, vendorId: e.target.value })}
             >
               <option value="">Select a vendor</option>
-              {mockVendors.map((v) => (
+              {vendorOptions.map((v) => (
                 <option key={v.id} value={v.id}>{v.name}</option>
               ))}
             </select>

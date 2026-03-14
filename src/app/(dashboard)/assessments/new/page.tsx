@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { useGlobalLoader } from '@/components/shared/global-loader-provider'
 import {
   AssessmentQuestionnaire,
   type Section,
@@ -176,6 +177,7 @@ const STEPS = [
 
 export default function NewAssessmentPage() {
   const router = useRouter()
+  const { withLoader } = useGlobalLoader()
   const [step, setStep] = useState(1)
   const [submitting, setSubmitting] = useState(false)
 
@@ -193,24 +195,26 @@ export default function NewAssessmentPage() {
   // Fetch vendors for search
   useEffect(() => {
     async function search() {
-      setLoadingVendors(true)
-      try {
-        const params = new URLSearchParams()
-        if (vendorSearch) params.set('search', vendorSearch)
-        params.set('status', 'active')
-        params.set('per_page', '10')
-        const res = await fetch(`/api/vendors?${params.toString()}`)
-        const body = await res.json()
-        if (res.ok) setVendors(body.data ?? [])
-      } catch {
-        // silently fail
-      } finally {
-        setLoadingVendors(false)
-      }
+      await withLoader(async () => {
+        setLoadingVendors(true)
+        try {
+          const params = new URLSearchParams()
+          if (vendorSearch) params.set('search', vendorSearch)
+          params.set('status', 'active')
+          params.set('per_page', '10')
+          const res = await fetch(`/api/vendors?${params.toString()}`)
+          const body = await res.json()
+          if (res.ok) setVendors(body.data ?? [])
+        } catch {
+          // silently fail
+        } finally {
+          setLoadingVendors(false)
+        }
+      })
     }
     const timer = setTimeout(search, 300)
     return () => clearTimeout(timer)
-  }, [vendorSearch])
+  }, [vendorSearch, withLoader])
 
   const sections = framework ? FRAMEWORK_TEMPLATES[framework] ?? [] : []
 
@@ -245,34 +249,36 @@ export default function NewAssessmentPage() {
       // Map 1-5 score to 0-100 risk score (lower assessment score = higher risk)
       const riskScore = avgScore !== null ? Math.round((1 - (avgScore - 1) / 4) * 100) : null
 
-      const res = await fetch('/api/assessments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vendor_id: selectedVendor.id,
-          title,
-          framework,
-          status: 'in_progress',
-          risk_score: riskScore,
-          risk_level:
-            riskScore !== null
-              ? riskScore >= 80
-                ? 'critical'
-                : riskScore >= 60
-                  ? 'high'
-                  : riskScore >= 40
-                    ? 'medium'
-                    : riskScore >= 20
-                      ? 'low'
-                      : 'minimal'
-              : null,
-          started_at: new Date().toISOString(),
-          findings: {
-            responses: assessmentResponses,
-            total_questions: totalQuestions,
-            answered_questions: answeredQuestions,
-          },
-        }),
+      const res = await withLoader(async () => {
+        return await fetch('/api/assessments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            vendor_id: selectedVendor.id,
+            title,
+            framework,
+            status: 'in_progress',
+            risk_score: riskScore,
+            risk_level:
+              riskScore !== null
+                ? riskScore >= 80
+                  ? 'critical'
+                  : riskScore >= 60
+                    ? 'high'
+                    : riskScore >= 40
+                      ? 'medium'
+                      : riskScore >= 20
+                        ? 'low'
+                        : 'minimal'
+                : null,
+            started_at: new Date().toISOString(),
+            findings: {
+              responses: assessmentResponses,
+              total_questions: totalQuestions,
+              answered_questions: answeredQuestions,
+            },
+          }),
+        })
       })
 
       if (res.ok) {

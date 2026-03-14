@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { VendorForm } from '@/components/vendors/vendor-form'
+import { useGlobalLoader } from '@/components/shared/global-loader-provider'
 import type { Vendor, VendorStatus, RiskLevel, Pagination } from '@/types'
 import {
   Plus,
@@ -99,6 +100,7 @@ function SkeletonRow() {
 
 export default function VendorsPage() {
   const router = useRouter()
+  const { withLoader } = useGlobalLoader()
   const [vendors, setVendors] = useState<Vendor[]>([])
   const [pagination, setPagination] = useState<Pagination>({
     page: 1,
@@ -115,36 +117,38 @@ export default function VendorsPage() {
   const [actionMenuId, setActionMenuId] = useState<string | null>(null)
 
   const fetchVendors = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params = new URLSearchParams()
-      params.set('page', String(pagination.page))
-      params.set('per_page', '20')
-      if (search) params.set('search', search)
-      if (statusFilter) params.set('status', statusFilter)
-      if (riskFilter) params.set('risk_level', riskFilter)
+    await withLoader(async () => {
+      setLoading(true)
+      try {
+        const params = new URLSearchParams()
+        params.set('page', String(pagination.page))
+        params.set('per_page', '20')
+        if (search) params.set('search', search)
+        if (statusFilter) params.set('status', statusFilter)
+        if (riskFilter) params.set('risk_level', riskFilter)
 
-      const res = await fetch(`/api/vendors?${params.toString()}`)
-      const body = await res.json()
-      if (res.ok) {
-        setVendors(body.data ?? [])
-        if (body.pagination) {
-          setPagination({
-            page: body.pagination.page,
-            per_page: body.pagination.per_page,
-            total: body.pagination.total ?? 0,
-            total_pages: Math.ceil(
-              (body.pagination.total ?? 0) / body.pagination.per_page
-            ),
-          })
+        const res = await fetch(`/api/vendors?${params.toString()}`)
+        const body = await res.json()
+        if (res.ok) {
+          setVendors(body.data ?? [])
+          if (body.pagination) {
+            setPagination({
+              page: body.pagination.page,
+              per_page: body.pagination.per_page,
+              total: body.pagination.total ?? 0,
+              total_pages: Math.ceil(
+                (body.pagination.total ?? 0) / body.pagination.per_page
+              ),
+            })
+          }
         }
+      } catch {
+        // silently fail
+      } finally {
+        setLoading(false)
       }
-    } catch {
-      // silently fail
-    } finally {
-      setLoading(false)
-    }
-  }, [pagination.page, search, statusFilter, riskFilter])
+    })
+  }, [pagination.page, search, statusFilter, riskFilter, withLoader])
 
   useEffect(() => {
     fetchVendors()
@@ -153,8 +157,10 @@ export default function VendorsPage() {
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to offboard this vendor?')) return
     try {
-      await fetch(`/api/vendors/${id}`, { method: 'DELETE' })
-      fetchVendors()
+      await withLoader(async () => {
+        await fetch(`/api/vendors/${id}`, { method: 'DELETE' })
+      })
+      await fetchVendors()
     } catch {
       // silently fail
     }

@@ -2,6 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
+import { GlobalLoaderProvider } from '@/components/shared/global-loader-provider'
 // Install sonner for toast notifications: npm install sonner
 // import { Toaster } from 'sonner'
 
@@ -20,7 +21,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {children}
+      <GlobalLoaderProvider>{children}</GlobalLoaderProvider>
       {/* <Toaster position="top-right" richColors /> */}
     </QueryClientProvider>
   )

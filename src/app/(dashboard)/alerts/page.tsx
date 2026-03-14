@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bell,
   BellOff,
@@ -17,8 +17,9 @@ import {
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useGlobalLoader } from '@/components/shared/global-loader-provider'
+import type { Database } from '@/types/database'
 
 // --- Types ---
 
@@ -48,20 +49,7 @@ interface Alert {
   createdAt: string
 }
 
-// --- Mock Data ---
-
-const mockAlerts: Alert[] = [
-  { id: '1', type: 'incident_reported', priority: 'critical', title: 'Critical Incident: Unauthorized PHI Access', message: 'A critical security incident involving unauthorized PHI access has been reported for CloudMedix. Immediate investigation required.', source: 'Incident Management', referenceType: 'incident', isRead: false, createdAt: '2026-03-14T08:30:00Z' },
-  { id: '2', type: 'contract_expiring', priority: 'high', title: 'Contract Expiring: DataVault Pro', message: 'The service agreement with DataVault Pro expires in 14 days (March 28, 2026). Review renewal terms.', source: 'Contract Management', referenceType: 'contract', isRead: false, createdAt: '2026-03-14T06:00:00Z' },
-  { id: '3', type: 'compliance_gap', priority: 'high', title: 'HIPAA Compliance Gap Detected', message: 'HealthSync has been flagged as non-compliant for HIPAA-164.312(c) Integrity Controls. Remediation required within 30 days.', source: 'Compliance Tracking', referenceType: 'compliance', isRead: false, createdAt: '2026-03-13T14:00:00Z' },
-  { id: '4', type: 'assessment_due', priority: 'medium', title: 'Risk Assessment Due: MedSecure', message: 'The annual risk assessment for MedSecure is due in 21 days. Schedule the assessment with the vendor.', source: 'Risk Assessment', referenceType: 'assessment', isRead: true, createdAt: '2026-03-12T10:00:00Z' },
-  { id: '5', type: 'baa_expiring', priority: 'medium', title: 'BAA Expiring: HealthSync', message: 'The Business Associate Agreement with HealthSync expires on May 31, 2026. Initiate renewal process.', source: 'Contract Management', referenceType: 'baa', isRead: true, createdAt: '2026-03-11T09:00:00Z' },
-  { id: '6', type: 'risk_score_change', priority: 'medium', title: 'Risk Score Increased: CloudMedix', message: 'CloudMedix risk score increased from 35 to 68 due to the recent security incident. Review vendor risk profile.', source: 'Risk Management', referenceType: 'vendor', isRead: false, createdAt: '2026-03-13T11:00:00Z' },
-  { id: '7', type: 'document_expiring', priority: 'low', title: 'Document Expiring: SOC 2 Report', message: 'The SOC 2 Type II report for CloudMedix expires in 45 days. Request an updated report from the vendor.', source: 'Document Management', referenceType: 'document', isRead: true, createdAt: '2026-03-10T15:00:00Z' },
-  { id: '8', type: 'remediation_overdue', priority: 'high', title: 'Overdue Remediation: Delayed Patch Deployment', message: 'The remediation task for delayed security patch deployment at CloudMedix is overdue by 5 days.', source: 'Remediation Tracking', referenceType: 'remediation', isRead: false, createdAt: '2026-03-13T08:00:00Z' },
-  { id: '9', type: 'system', priority: 'info', title: 'System Update: New Compliance Framework Added', message: 'NIST CSF 2.0 framework has been added to the platform. You can now track compliance against this framework.', source: 'System', referenceType: null, isRead: true, createdAt: '2026-03-09T12:00:00Z' },
-  { id: '10', type: 'vendor_status_change', priority: 'low', title: 'Vendor Status Changed: ComplianceHub', message: 'ComplianceHub status has been changed from Active to Inactive. All associated services should be reviewed.', source: 'Vendor Management', referenceType: 'vendor', isRead: true, createdAt: '2026-03-08T16:00:00Z' },
-]
+type AlertRow = Database['public']['Tables']['alerts']['Row']
 
 // --- Helpers ---
 
@@ -109,9 +97,43 @@ function timeAgo(dateStr: string): string {
 // --- Component ---
 
 export default function AlertsPage() {
-  const [isLoading] = useState(false)
-  const [alerts, setAlerts] = useState(mockAlerts)
+  const [isLoading, setIsLoading] = useState(true)
+  const [alerts, setAlerts] = useState<Alert[]>([])
+  const [markingAllRead, setMarkingAllRead] = useState(false)
+  const [markingReadIds, setMarkingReadIds] = useState<Set<string>>(new Set())
   const [activeTab, setActiveTab] = useState<'all' | 'unread' | 'critical' | 'high'>('all')
+  const { withLoader } = useGlobalLoader()
+
+  const mapAlert = useCallback((row: AlertRow): Alert => ({
+    id: row.id,
+    type: row.type,
+    priority: row.priority,
+    title: row.title,
+    message: row.message ?? '',
+    source: row.source,
+    referenceType: row.reference_type,
+    isRead: row.is_read,
+    createdAt: row.created_at,
+  }), [])
+
+  const fetchAlerts = useCallback(async () => {
+    await withLoader(async () => {
+      try {
+        setIsLoading(true)
+        const res = await fetch('/api/alerts?per_page=100', { cache: 'no-store' })
+        if (!res.ok) return
+
+        const payload = (await res.json()) as { data?: AlertRow[] }
+        setAlerts((payload.data ?? []).map(mapAlert))
+      } finally {
+        setIsLoading(false)
+      }
+    })
+  }, [mapAlert, withLoader])
+
+  useEffect(() => {
+    void fetchAlerts()
+  }, [fetchAlerts])
 
   const filteredAlerts = useMemo(() => {
     switch (activeTab) {
@@ -124,16 +146,50 @@ export default function AlertsPage() {
 
   const unreadCount = useMemo(() => alerts.filter((a) => !a.isRead).length, [alerts])
 
-  function markAsRead(id: string) {
-    setAlerts((prev) => prev.map((a) => a.id === id ? { ...a, isRead: true } : a))
+  async function markAsRead(id: string) {
+    setMarkingReadIds((prev) => new Set(prev).add(id))
+
+    try {
+      const res = await withLoader(async () => {
+        return await fetch('/api/alerts', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id }),
+        })
+      })
+
+      if (!res.ok) return
+      setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, isRead: true } : a)))
+    } finally {
+      setMarkingReadIds((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+    }
   }
 
   function dismissAlert(id: string) {
     setAlerts((prev) => prev.filter((a) => a.id !== id))
   }
 
-  function markAllRead() {
-    setAlerts((prev) => prev.map((a) => ({ ...a, isRead: true })))
+  async function markAllRead() {
+    setMarkingAllRead(true)
+
+    try {
+      const res = await withLoader(async () => {
+        return await fetch('/api/alerts', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ all: true }),
+        })
+      })
+
+      if (!res.ok) return
+      setAlerts((prev) => prev.map((a) => ({ ...a, isRead: true })))
+    } finally {
+      setMarkingAllRead(false)
+    }
   }
 
   if (isLoading) {
@@ -157,7 +213,7 @@ export default function AlertsPage() {
             {unreadCount} unread notification{unreadCount !== 1 ? 's' : ''}
           </p>
         </div>
-        <Button variant="outline" onClick={markAllRead} disabled={unreadCount === 0}>
+        <Button variant="outline" onClick={markAllRead} disabled={unreadCount === 0 || markingAllRead}>
           <CheckCheck className="size-4" />
           Mark All Read
         </Button>
@@ -246,6 +302,7 @@ export default function AlertsPage() {
                             size="xs"
                             className="text-xs"
                             onClick={() => markAsRead(alert.id)}
+                            disabled={markingReadIds.has(alert.id)}
                           >
                             <Check className="size-3" />
                             Mark Read

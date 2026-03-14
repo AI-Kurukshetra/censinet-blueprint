@@ -15,6 +15,7 @@ import { RiskDistributionChart } from '@/components/dashboard/risk-distribution-
 import { AssessmentTrendChart } from '@/components/dashboard/assessment-trend-chart'
 import { RecentActivity, type ActivityEntry } from '@/components/dashboard/recent-activity'
 import { TopRiskVendors, type RiskVendor } from '@/components/dashboard/top-risk-vendors'
+import { useGlobalLoader } from '@/components/shared/global-loader-provider'
 import type { DashboardMetrics } from '@/types'
 
 interface DashboardData {
@@ -98,28 +99,39 @@ function TableSkeleton() {
 }
 
 export default function DashboardPage() {
+  const { withLoader } = useGlobalLoader()
   const [data, setData] = useState<DashboardData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     async function fetchDashboardData() {
-      try {
-        const response = await fetch('/api/dashboard')
-        if (!response.ok) {
-          throw new Error('Failed to fetch dashboard data')
+      await withLoader(async () => {
+        try {
+          const response = await fetch('/api/dashboard')
+          const result = await response.json()
+          if (!response.ok) {
+            const message =
+              typeof result?.error === 'string' ? result.error : 'Failed to fetch dashboard data'
+            throw new Error(message)
+          }
+
+          const payload = result?.data ?? result
+          if (!payload || typeof payload !== 'object' || !('metrics' in payload)) {
+            throw new Error('Dashboard response payload is invalid')
+          }
+
+          setData(payload as DashboardData)
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'An error occurred')
+        } finally {
+          setIsLoading(false)
         }
-        const result = await response.json()
-        setData(result.data)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'An error occurred')
-      } finally {
-        setIsLoading(false)
-      }
+      })
     }
 
-    fetchDashboardData()
-  }, [])
+    void fetchDashboardData()
+  }, [withLoader])
 
   return (
     <div className="space-y-6 p-6 lg:p-8">
