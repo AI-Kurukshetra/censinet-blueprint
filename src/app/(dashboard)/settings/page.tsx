@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   User,
   Building2,
   Shield,
   Bell,
+  Users,
   Save,
   Upload,
   Eye,
@@ -19,6 +20,7 @@ import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
 import { createClient } from '@/lib/supabase/client'
+import type { UserRole } from '@/types/database'
 
 // --- Types ---
 
@@ -56,15 +58,43 @@ interface NotificationPrefs {
   systemUpdates: boolean
 }
 
+interface TeamMember {
+  id: string
+  first_name: string | null
+  last_name: string | null
+  email: string
+  role: UserRole
+  is_active: boolean
+  last_login: string | null
+  created_at: string
+}
+
+const ROLE_OPTIONS: UserRole[] = [
+  'owner',
+  'admin',
+  'compliance_officer',
+  'risk_manager',
+  'analyst',
+  'viewer',
+]
+
+function roleLabel(role: string) {
+  return role.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 // --- Component ---
 
 export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'profile' | 'organization' | 'security' | 'notifications'>('profile')
+  const [activeTab, setActiveTab] = useState<'profile' | 'organization' | 'team' | 'security' | 'notifications'>('profile')
   const [showCurrentPassword, setShowCurrentPassword] = useState(false)
   const [showNewPassword, setShowNewPassword] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isTeamLoading, setIsTeamLoading] = useState(false)
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null)
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
 
   const [profile, setProfile] = useState<ProfileData>({
     firstName: '',
@@ -108,6 +138,7 @@ export default function SettingsPage() {
       try {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
+        setCurrentUserId(user.id)
 
         const { data: profileData } = await supabase
           .from('user_profiles')
@@ -116,6 +147,7 @@ export default function SettingsPage() {
           .single()
 
         if (profileData) {
+          setCurrentUserRole(profileData.role as UserRole)
           setProfile({
             firstName: profileData.first_name || '',
             lastName: profileData.last_name || '',
@@ -125,7 +157,7 @@ export default function SettingsPage() {
             department: profileData.department || '',
           })
 
-          const orgData = profileData.organizations as any
+          const orgData = profileData.organizations as { name?: string; domain?: string; logo_url?: string } | null
           if (orgData) {
             setOrg({
               name: orgData.name || '',
@@ -143,6 +175,30 @@ export default function SettingsPage() {
 
     loadProfile()
   }, [])
+
+  const loadTeamMembers = useCallback(async () => {
+    setIsTeamLoading(true)
+    try {
+      const res = await fetch('/api/organizations/members')
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Failed to load team')
+      }
+      const payload = await res.json()
+      setTeamMembers(payload.members || [])
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to load team'
+      showMessage('error', message)
+    } finally {
+      setIsTeamLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (currentUserRole === 'owner' || currentUserRole === 'admin') {
+      loadTeamMembers()
+    }
+  }, [currentUserRole, loadTeamMembers])
 
   function showMessage(type: 'success' | 'error', text: string) {
     setSaveMessage({ type, text })
@@ -168,8 +224,9 @@ export default function SettingsPage() {
         throw new Error(err.error || 'Failed to update profile')
       }
       showMessage('success', 'Profile updated successfully')
-    } catch (err: any) {
-      showMessage('error', err.message || 'Failed to update profile')
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to update profile'
+      showMessage('error', message)
     } finally {
       setIsSaving(false)
     }
@@ -192,8 +249,9 @@ export default function SettingsPage() {
         throw new Error(err.error || 'Failed to update organization')
       }
       showMessage('success', 'Organization updated successfully')
-    } catch (err: any) {
-      showMessage('error', err.message || 'Failed to update organization')
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to update organization'
+      showMessage('error', message)
     } finally {
       setIsSaving(false)
     }
@@ -210,8 +268,40 @@ export default function SettingsPage() {
       if (error) throw error
       setPasswords({ currentPassword: '', newPassword: '', confirmPassword: '' })
       showMessage('success', 'Password updated successfully')
-    } catch (err: any) {
-      showMessage('error', err.message || 'Failed to update password')
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to update password'
+      showMessage('error', message)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function handleMemberUpdate(
+    memberId: string,
+    updates: { role?: UserRole; is_active?: boolean }
+  ) {
+    setIsSaving(true)
+    try {
+      const res = await fetch('/api/organizations/members', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          member_id: memberId,
+          ...updates,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Failed to update member')
+      }
+      const payload = await res.json()
+      setTeamMembers((prev) =>
+        prev.map((m) => (m.id === memberId ? (payload.member as TeamMember) : m))
+      )
+      showMessage('success', 'Team member updated')
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to update member'
+      showMessage('error', message)
     } finally {
       setIsSaving(false)
     }
@@ -220,6 +310,7 @@ export default function SettingsPage() {
   const tabs = [
     { id: 'profile' as const, label: 'Profile', icon: User },
     { id: 'organization' as const, label: 'Organization', icon: Building2 },
+    { id: 'team' as const, label: 'Team', icon: Users },
     { id: 'security' as const, label: 'Security', icon: Shield },
     { id: 'notifications' as const, label: 'Notifications', icon: Bell },
   ]
@@ -420,6 +511,91 @@ export default function SettingsPage() {
                     {isSaving ? 'Saving...' : 'Save Changes'}
                   </Button>
                 </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Team Tab */}
+          {activeTab === 'team' && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Team & Roles</CardTitle>
+                <CardDescription>
+                  Manage organization members and role permissions
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {currentUserRole !== 'owner' && currentUserRole !== 'admin' ? (
+                  <div className="rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+                    You need owner or admin role to manage team members.
+                  </div>
+                ) : isTeamLoading ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-16 w-full" />
+                    <Skeleton className="h-16 w-full" />
+                    <Skeleton className="h-16 w-full" />
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {teamMembers.map((member) => {
+                      const name = [member.first_name, member.last_name]
+                        .filter(Boolean)
+                        .join(' ')
+                      const isSelf = member.id === currentUserId
+                      return (
+                        <div
+                          key={member.id}
+                          className="grid gap-3 rounded-lg border p-4 sm:grid-cols-[1fr_auto_auto]"
+                        >
+                          <div>
+                            <p className="text-sm font-medium">
+                              {name || 'Unnamed User'}
+                              {isSelf ? ' (You)' : ''}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {member.email}
+                            </p>
+                          </div>
+
+                          <select
+                            className="h-9 rounded-md border bg-background px-3 text-sm"
+                            value={member.role}
+                            disabled={
+                              isSaving ||
+                              (currentUserRole === 'admin' &&
+                                (member.role === 'owner' || member.role === 'admin')) ||
+                              (member.role === 'owner' && currentUserRole !== 'owner')
+                            }
+                            onChange={(e) =>
+                              handleMemberUpdate(member.id, {
+                                role: e.target.value as UserRole,
+                              })
+                            }
+                          >
+                            {ROLE_OPTIONS.map((role) => (
+                              <option key={role} value={role}>
+                                {roleLabel(role)}
+                              </option>
+                            ))}
+                          </select>
+
+                          <Button
+                            variant={member.is_active ? 'outline' : 'default'}
+                            size="sm"
+                            disabled={isSaving || isSelf || (currentUserRole === 'admin' && member.role === 'owner')}
+                            onClick={() =>
+                              handleMemberUpdate(member.id, {
+                                is_active: !member.is_active,
+                              })
+                            }
+                          >
+                            {member.is_active ? 'Deactivate' : 'Activate'}
+                          </Button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
