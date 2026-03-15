@@ -45,3 +45,4 @@ next-env.d.ts
 /.clause
 /docs
 .env*.local
+/artifacts
